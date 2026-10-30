@@ -337,11 +337,11 @@ fun ModesScreen(
                 availableNfcTags = appState.nfcTags,
                 allModes = appState.modes,  // FIX #8: pass all modes for NFC usage indicator
                 onBack = { selectedMode = null },
-                onSave = { apps, blockMode, nfcTagIds, tagUnlockLimits ->
+                onSave = { apps, blockMode, nfcTagIds, tagUnlockLimits, options ->
                     if (appState.modes.any { it.id == mode.id }) {
-                        viewModel.updateMode(mode.id, mode.name, apps, blockMode, nfcTagIds, tagUnlockLimits)
+                        viewModel.updateMode(mode.id, mode.name, apps, blockMode, nfcTagIds, tagUnlockLimits, options)
                     } else {
-                        viewModel.addMode(mode.name, apps, blockMode, nfcTagIds, tagUnlockLimits)
+                        viewModel.addMode(mode.name, apps, blockMode, nfcTagIds, tagUnlockLimits, options)
                     }
                     selectedMode = null
                 },

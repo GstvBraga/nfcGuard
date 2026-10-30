@@ -49,6 +49,8 @@ fun HomeScreen(
     onNavigate: (Screen) -> Unit
 ) {
     val appState by viewModel.appState.collectAsState()
+    val tagActions = com.andebugulin.nfcguard.ui.LocalTagActions.current
+    var breakModeId by remember { mutableStateOf<String?>(null) }
     val challengeDuration by viewModel.challengeDurationSeconds.collectAsState()
     val context = LocalContext.current
 
@@ -190,6 +192,20 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = stringResource(R.string.tags_scan_code),
+                    tint = GuardianTheme.IconPrimary,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            tagActions.scanCode()
+                        }
+                )
+
                 // Was a trash icon labelled "Emergency Reset" — which reads as
                 // "delete everything". This flow turns blocking off when you
                 // have lost your tag; nothing of yours is destroyed unless you
@@ -267,6 +283,14 @@ fun HomeScreen(
             icon = Icons.Default.Nfc,
             testTag = TestTags.Home.NAV_NFC_TAGS,
             onClick = { onNavigate(Screen.NFC_TAGS) }
+        )
+
+        NavigationCard(
+            title = stringResource(R.string.stats_title),
+            subtitle = stringResource(R.string.stats_subtitle),
+            icon = Icons.Default.BarChart,
+            testTag = "home_nav_stats",
+            onClick = { onNavigate(Screen.STATS) }
         )
 
         Spacer(Modifier.weight(1f))
@@ -367,6 +391,18 @@ fun HomeScreen(
                                     letterSpacing = 1.sp
                                 )
                             }
+                            val breakLeft = com.andebugulin.nfcguard.BreakLogic.remainingMinutes(appState, mode.id)
+                            if (breakLeft != null && breakLeft > 0) {
+                                TextButton(onClick = { breakModeId = mode.id }) {
+                                    Text(
+                                        stringResource(R.string.break_button, formatDuration(breakLeft)),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -450,6 +486,18 @@ fun HomeScreen(
         BlockedAppsDialog(
             rule = BlockDecider.ruleFor(appState),
             onDismiss = { showBlockedApps = false }
+        )
+    }
+
+    breakModeId?.let { modeId ->
+        val left = com.andebugulin.nfcguard.BreakLogic.remainingMinutes(appState, modeId) ?: 0
+        BreakDialog(
+            remainingMinutes = left,
+            onDismiss = { breakModeId = null },
+            onStart = { minutes ->
+                viewModel.startBreak(modeId, minutes)
+                breakModeId = null
+            }
         )
     }
 

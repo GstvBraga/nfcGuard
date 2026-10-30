@@ -149,6 +149,15 @@ fun NfcTagsScreen(
                             )
                         }
                     }
+
+                    item {
+                        val tagActions = com.andebugulin.nfcguard.ui.LocalTagActions.current
+                        TextButton(onClick = tagActions.writeTag, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Edit, contentDescription = null, tint = GuardianTheme.IconSecondary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.tags_write_tag), style = GuardianType.Label, color = GuardianTheme.TextSecondary)
+                        }
+                    }
                 }
             }
         }
@@ -644,6 +653,13 @@ fun NfcTagRegistrationDialog(
                                 color = GuardianTheme.TextTertiary,
                                 letterSpacing = 0.5.sp
                             )
+                            Spacer(Modifier.height(12.dp))
+                            val tagActions = com.andebugulin.nfcguard.ui.LocalTagActions.current
+                            TextButton(onClick = tagActions.scanCode) {
+                                Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = GuardianTheme.IconPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.tags_scan_code), style = GuardianType.Label, color = GuardianTheme.TextPrimary)
+                            }
                         }
                     }
                 } else if (isDuplicate) {

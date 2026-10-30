@@ -3,13 +3,19 @@ package com.andebugulin.nfcguard.sync
 import com.andebugulin.nfcguard.AppState
 import com.andebugulin.nfcguard.BlockDecider
 import com.andebugulin.nfcguard.BlockMode
+import com.andebugulin.nfcguard.ModeEffects
 import com.andebugulin.nfcguard.data.AppLogger
 import com.andebugulin.nfcguard.data.AppStateRepository
+import com.andebugulin.nfcguard.data.SessionLog
+import com.andebugulin.nfcguard.receiver.AutomationReceiver
 import com.andebugulin.nfcguard.receiver.ScheduleAlarmReceiver
 import com.andebugulin.nfcguard.service.BlockerService
+import com.andebugulin.nfcguard.service.DeviceEffects
+import com.andebugulin.nfcguard.service.QuickTileService
 import com.andebugulin.nfcguard.widget.GuardianWidget
 
 import android.content.Context
+import android.content.Intent
 
 /**
  * Single dispatch point for state → platform side effects.
@@ -24,6 +30,9 @@ import android.content.Context
  *      against the previous state and schedule/cancel alarms via
  *      [TimedAlarms] for each map entry that changed.
  *   4. Refresh widget(s) via [GuardianWidget.notifyAllWidgets].
+ *   5. Mode side effects: device settings ([DeviceEffects]), session
+ *      history ([SessionLog]) and, for modes that just turned on or off,
+ *      the launch-app option and the automation broadcasts.
  *
  * Wired into [AppStateRepository.update] / [updateWith] so every
  * successful write fires the side effects exactly once. Callers that
@@ -55,6 +64,36 @@ object StateSyncer {
         ScheduleAlarmReceiver.scheduleAllUpcomingAlarms(context)
         syncTimedAlarms(context, oldState, newState)
         GuardianWidget.notifyAllWidgets(context)
+        QuickTileService.requestRefresh(context)
+        applyModeSideEffects(context, newState)
+    }
+
+    private fun applyModeSideEffects(context: Context, state: AppState) {
+        DeviceEffects.apply(context, ModeEffects.effectsFor(state))
+
+        val changes = SessionLog.track(context, state, System.currentTimeMillis())
+        val modes = state.modes.associateBy { it.id }
+        changes.started.forEach { modeId ->
+            modes[modeId]?.options?.launchApp?.let { pkg ->
+                runCatching {
+                    context.packageManager.getLaunchIntentForPackage(pkg)
+                        ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ?.let(context::startActivity)
+                }.onFailure { AppLogger.log("SYNC", "Launch $pkg failed: ${it.message}") }
+            }
+            broadcast(context, AutomationReceiver.MODE_STARTED, modeId, modes[modeId]?.name)
+        }
+        changes.ended.forEach { modeId ->
+            broadcast(context, AutomationReceiver.MODE_STOPPED, modeId, modes[modeId]?.name)
+        }
+    }
+
+    private fun broadcast(context: Context, action: String, modeId: String, modeName: String?) {
+        context.sendBroadcast(
+            Intent(action)
+                .putExtra(AutomationReceiver.EXTRA_MODE_ID, modeId)
+                .putExtra(AutomationReceiver.EXTRA_MODE_NAME, modeName ?: modeId)
+        )
     }
 
     private fun syncTimedAlarms(context: Context, old: AppState, new: AppState) {

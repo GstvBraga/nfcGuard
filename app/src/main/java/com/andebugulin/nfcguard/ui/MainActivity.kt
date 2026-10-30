@@ -5,6 +5,7 @@ import androidx.compose.ui.res.stringResource
 import com.andebugulin.nfcguard.data.AppLogger
 import com.andebugulin.nfcguard.data.AppStateRepository
 import com.andebugulin.nfcguard.Schedule
+import com.andebugulin.nfcguard.TagStartLogic
 import com.andebugulin.nfcguard.service.ForegroundDetectorService
 import com.andebugulin.nfcguard.ui.home.HomeScreen
 import com.andebugulin.nfcguard.ui.info.InfoScreen
@@ -13,12 +14,20 @@ import com.andebugulin.nfcguard.ui.modes.UnlockDurationDialog
 import com.andebugulin.nfcguard.ui.modes.UnlockModeInfo
 import com.andebugulin.nfcguard.ui.nfc.NfcTagsScreen
 import com.andebugulin.nfcguard.ui.schedules.SchedulesScreen
+import com.andebugulin.nfcguard.ui.stats.StatsScreen
 
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.nfc.NdefMessage
+import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.nfc.tech.Ndef
+import android.nfc.tech.NdefFormatable
+import android.widget.Toast
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -54,7 +63,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.saveable.rememberSaveable
 
 enum class Screen {
-    HOME, MODES, SCHEDULES, NFC_TAGS, INFO
+    HOME, MODES, SCHEDULES, NFC_TAGS, INFO, STATS
 }
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +72,27 @@ class MainActivity : ComponentActivity() {
     private var scannedNfcTagId = mutableStateOf<String?>(null)
     private var wrongTagScanned = mutableStateOf(false)
     var nfcRegistrationMode = mutableStateOf(false)
+    private var tagWriteRequested = false
+
+    /** QR codes and barcodes stand in for tags: their content becomes a "qr:"-prefixed tag id. */
+    private val codeScanner = registerForActivityResult(ScanContract()) { result ->
+        result.contents?.let { onTagScanned("$CODE_TAG_PREFIX$it") }
+    }
+
+    private val tagActions = TagActions(
+        scanCode = {
+            codeScanner.launch(
+                ScanOptions()
+                    .setBeepEnabled(false)
+                    .setOrientationLocked(false)
+                    .setPrompt(getString(R.string.tags_scan_code_prompt))
+            )
+        },
+        writeTag = {
+            tagWriteRequested = true
+            Toast.makeText(this, R.string.tags_write_hold_tag, Toast.LENGTH_LONG).show()
+        }
+    )
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,12 +120,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             MinimalistTheme {
                 val viewModel: GuardianViewModel = viewModel()
-                MainNavigation(
-                    viewModel = viewModel,
-                    scannedNfcTagId = scannedNfcTagId,
-                    wrongTagScanned = wrongTagScanned,
-                    nfcRegistrationMode = nfcRegistrationMode
-                )
+                CompositionLocalProvider(LocalTagActions provides tagActions) {
+                    MainNavigation(
+                        viewModel = viewModel,
+                        scannedNfcTagId = scannedNfcTagId,
+                        wrongTagScanned = wrongTagScanned,
+                        nfcRegistrationMode = nfcRegistrationMode
+                    )
+                }
             }
         }
 
@@ -129,35 +161,73 @@ class MainActivity : ComponentActivity() {
         ) {
             val tag: Tag? = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
             tag?.let {
-                val tagId = it.id.joinToString("") { byte -> "%02x".format(byte) }
-                android.util.Log.d("NFC_SCAN", "Scanned tag: $tagId")
-                AppLogger.log("NFC", "Tag scanned: $tagId")
-
-                // Check if this is a valid tag for current active modes
-                try {
-                    val appState = AppStateRepository.getInstance(this).current
-                    val activeModes = appState.modes.filter { appState.activeModes.contains(it.id) }
-                    val hasNfcLockedMode = activeModes.any { it.nfcTagIds.isNotEmpty() }
-
-                    if (hasNfcLockedMode && !nfcRegistrationMode.value) {
-                        val validTag = activeModes.any { it.nfcTagIds.contains(tagId) || it.nfcTagIds.isEmpty() || it.nfcTagIds.contains("ANY") }
-                        if (!validTag && appState.activeModes.isNotEmpty()) {
-                            // Wrong tag scanned!
-                            AppLogger.log("NFC", "WRONG TAG for active modes (tag=$tagId, activeModes=${appState.activeModes})")
-                            wrongTagScanned.value = true
-                            this@MainActivity.lifecycleScope.launch {
-                                kotlinx.coroutines.delay(2000)
-                                wrongTagScanned.value = false
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("NFC_SCAN", "Error validating tag: ${e.message}")
+                if (tagWriteRequested) {
+                    tagWriteRequested = false
+                    val ok = writeAppRecord(it)
+                    Toast.makeText(
+                        this,
+                        if (ok) R.string.tags_write_done else R.string.tags_write_failed,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return
                 }
-
-                scannedNfcTagId.value = tagId
+                onTagScanned(it.id.joinToString("") { byte -> "%02x".format(byte) })
             }
         }
+    }
+
+    private fun onTagScanned(tagId: String) {
+        android.util.Log.d("NFC_SCAN", "Scanned tag: $tagId")
+        AppLogger.log("NFC", "Tag scanned: $tagId")
+
+        // Check if this is a valid tag for current active modes
+        try {
+            val appState = AppStateRepository.getInstance(this).current
+            val activeModes = appState.modes.filter { appState.activeModes.contains(it.id) }
+            val hasNfcLockedMode = activeModes.any { it.nfcTagIds.isNotEmpty() }
+            // A tag that switches some other mode on is not a wrong tag.
+            val startsSomething = TagStartLogic.apply(appState, tagId, System.currentTimeMillis()).changed
+
+            if (hasNfcLockedMode && !nfcRegistrationMode.value && !startsSomething) {
+                val validTag = activeModes.any { it.nfcTagIds.contains(tagId) || it.nfcTagIds.isEmpty() || it.nfcTagIds.contains("ANY") }
+                if (!validTag && appState.activeModes.isNotEmpty()) {
+                    // Wrong tag scanned!
+                    AppLogger.log("NFC", "WRONG TAG for active modes (tag=$tagId, activeModes=${appState.activeModes})")
+                    wrongTagScanned.value = true
+                    this@MainActivity.lifecycleScope.launch {
+                        kotlinx.coroutines.delay(2000)
+                        wrongTagScanned.value = false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("NFC_SCAN", "Error validating tag: ${e.message}")
+        }
+
+        scannedNfcTagId.value = tagId
+    }
+
+    /**
+     * Write an Android Application Record so Android always hands this tag to
+     * nfcGuard, even when another NFC app is installed. The tag's UID, which
+     * is what nfcGuard matches on, is unchanged, so registrations still hold.
+     */
+    private fun writeAppRecord(tag: Tag): Boolean = runCatching {
+        val message = NdefMessage(arrayOf(NdefRecord.createApplicationRecord(packageName)))
+        val ndef = Ndef.get(tag)
+        if (ndef != null) {
+            ndef.use { it.connect(); it.writeNdefMessage(message) }
+        } else {
+            NdefFormatable.get(tag)!!.use { it.connect(); it.format(message) }
+        }
+        true
+    }.getOrElse {
+        AppLogger.log("NFC", "Tag write failed: ${it.message}")
+        false
+    }
+
+    companion object {
+        const val CODE_TAG_PREFIX = "qr:"
     }
 
 }
@@ -197,8 +267,8 @@ fun MainNavigation(
     // Handle NFC tag scans when modes are active (for unlocking)
     LaunchedEffect(scannedNfcTagId.value, appState.activeModes) {
         val tagId = scannedNfcTagId.value
-        if (tagId != null && appState.activeModes.isNotEmpty() && !nfcRegistrationMode.value) {
-            android.util.Log.d("MAIN_NAV", "NFC tag scanned with active modes - showing unlock dialog")
+        if (tagId != null && !nfcRegistrationMode.value) {
+            android.util.Log.d("MAIN_NAV", "NFC tag scanned - unlocking or starting modes")
             viewModel.handleNfcTag(tagId)
             scannedNfcTagId.value = null
         }
@@ -257,6 +327,9 @@ fun MainNavigation(
                     onBack = { currentScreen = Screen.HOME }
                 )
                 Screen.INFO -> InfoScreen(
+                    onBack = { currentScreen = Screen.HOME }
+                )
+                Screen.STATS -> StatsScreen(
                     onBack = { currentScreen = Screen.HOME }
                 )
             }

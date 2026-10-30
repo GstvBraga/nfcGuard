@@ -138,6 +138,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.8.0")
     implementation("androidx.compose.material:material-icons-extended")
+
+    // QR code / barcode scanning as an alternative to NFC tags
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     // Coroutines

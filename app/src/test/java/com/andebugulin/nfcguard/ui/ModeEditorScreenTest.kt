@@ -86,8 +86,8 @@ class ModeEditorScreenTest {
     private fun show(
         m: com.andebugulin.nfcguard.Mode = mode(id = "m1", name = "Focus", apps = emptyList()),
         tags: List<com.andebugulin.nfcguard.NfcTag> = listOf(tag(id = "t1", name = "Desk")),
-        onSave: (List<String>, BlockMode, List<String>, Map<String, Long?>) -> Unit =
-            { apps, blockMode, _, _ -> savedApps = apps; savedBlockMode = blockMode }
+        onSave: (List<String>, BlockMode, List<String>, Map<String, Long?>, com.andebugulin.nfcguard.ModeOptions) -> Unit =
+            { apps, blockMode, _, _, _ -> savedApps = apps; savedBlockMode = blockMode }
     ) = compose.setContent {
         MinimalistTheme {
             ModeEditorScreen(

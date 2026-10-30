@@ -3,11 +3,13 @@ package com.andebugulin.nfcguard.ui
 import com.andebugulin.nfcguard.ActivationResult
 import com.andebugulin.nfcguard.AppState
 import com.andebugulin.nfcguard.BlockMode
+import com.andebugulin.nfcguard.BreakLogic
 import com.andebugulin.nfcguard.data.AppLogger
 import com.andebugulin.nfcguard.data.AppStateRepository
 import com.andebugulin.nfcguard.data.ConfigManager
 import com.andebugulin.nfcguard.Mode
 import com.andebugulin.nfcguard.ModeActivationLogic
+import com.andebugulin.nfcguard.ModeOptions
 import com.andebugulin.nfcguard.NfcTag
 import com.andebugulin.nfcguard.NfcUnlockLogic
 import com.andebugulin.nfcguard.PendingUnlock
@@ -16,6 +18,7 @@ import com.andebugulin.nfcguard.ScheduleClock
 import com.andebugulin.nfcguard.receiver.ScheduleAlarmReceiver
 import com.andebugulin.nfcguard.service.BlockerService
 import com.andebugulin.nfcguard.sync.StateSyncer
+import com.andebugulin.nfcguard.TagStartLogic
 import com.andebugulin.nfcguard.TimeSlot
 import com.andebugulin.nfcguard.ui.schedules.SchedulesScreen
 
@@ -102,7 +105,7 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     private suspend fun mutate(transform: (AppState) -> AppState): AppState =
         repo.update(transform)
 
-    fun addMode(name: String, blockedApps: List<String>, blockMode: BlockMode = BlockMode.BLOCK_SELECTED, nfcTagIds: List<String> = emptyList(), tagUnlockLimits: Map<String, Long?> = emptyMap()) {
+    fun addMode(name: String, blockedApps: List<String>, blockMode: BlockMode = BlockMode.BLOCK_SELECTED, nfcTagIds: List<String> = emptyList(), tagUnlockLimits: Map<String, Long?> = emptyMap(), options: ModeOptions = ModeOptions()) {
         viewModelScope.launch {
             val newMode = Mode(
                 id = java.util.UUID.randomUUID().toString(),
@@ -110,13 +113,14 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
                 blockedApps = blockedApps,
                 blockMode = blockMode,
                 nfcTagIds = nfcTagIds,
-                tagUnlockLimits = tagUnlockLimits
+                tagUnlockLimits = tagUnlockLimits,
+                options = options
             )
             mutate { it.copy(modes = it.modes + newMode) }
         }
     }
 
-    fun updateMode(id: String, name: String, blockedApps: List<String>, blockMode: BlockMode, nfcTagIds: List<String>, tagUnlockLimits: Map<String, Long?> = emptyMap()) {
+    fun updateMode(id: String, name: String, blockedApps: List<String>, blockMode: BlockMode, nfcTagIds: List<String>, tagUnlockLimits: Map<String, Long?> = emptyMap(), options: ModeOptions = mode(id)?.options ?: ModeOptions()) {
         viewModelScope.launch {
             mutate { state ->
                 state.copy(
@@ -126,7 +130,8 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
                             blockedApps = blockedApps,
                             blockMode = blockMode,
                             nfcTagIds = nfcTagIds,
-                            tagUnlockLimits = tagUnlockLimits
+                            tagUnlockLimits = tagUnlockLimits,
+                            options = options
                         ) else mode
                     }
                 )
@@ -339,7 +344,18 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
                 tagId = tagId,
                 currentDayOfWeek = moment.day,
                 currentMinuteOfDay = moment.minuteOfDay
-            ) ?: return@launch
+            )
+            if (pending == null) {
+                // Nothing to unlock: the same tag may switch its modes on instead.
+                mutate { state ->
+                    val result = TagStartLogic.apply(state, tagId, System.currentTimeMillis())
+                    if (result.changed || result.conflicts.isNotEmpty()) {
+                        AppLogger.log("NFC", "Tag start: started=${result.started}, ended=${result.ended}, conflicts=${result.conflicts}")
+                    }
+                    result.newState
+                }
+                return@launch
+            }
 
             AppLogger.log("NFC", "Pending unlock: modes=${pending.modeIds}, schedules=${pending.schedulesToDeactivate}, limit=${pending.maxLimitMinutes}")
             _pendingUnlock.value = pending
@@ -380,6 +396,21 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
             // schedule reactivations if temporary) are diffed by StateSyncer.
         }
     }
+
+    /** Take a break from [modeId] for [minutes], drawn from its per-session budget. */
+    fun startBreak(modeId: String, minutes: Long) {
+        viewModelScope.launch {
+            mutate { state ->
+                val now = System.currentTimeMillis()
+                val moment = ScheduleClock.momentOf(now)
+                BreakLogic.startBreak(state, modeId, minutes, now, moment.day, moment.minuteOfDay)
+                    ?.also { AppLogger.log("BREAK", "Break of ${minutes}m on mode $modeId") }
+                    ?: state
+            }
+        }
+    }
+
+    private fun mode(id: String): Mode? = repo.current.modes.find { it.id == id }
 
     /** User dismissed the unlock dialog — do nothing, modes stay active */
     fun dismissUnlock() {

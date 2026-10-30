@@ -7,6 +7,7 @@ import androidx.compose.ui.res.stringResource
 import com.andebugulin.nfcguard.BlockDecider
 import com.andebugulin.nfcguard.BlockMode
 import com.andebugulin.nfcguard.Mode
+import com.andebugulin.nfcguard.ModeOptions
 import com.andebugulin.nfcguard.NfcTag
 import com.andebugulin.nfcguard.ui.GuardianTheme
 import com.andebugulin.nfcguard.ui.TestTags
@@ -66,7 +67,7 @@ fun ModeEditorScreen(
     availableNfcTags: List<NfcTag>,
     allModes: List<Mode> = emptyList(),  // FIX #8: Pass all modes for NFC usage count
     onBack: () -> Unit,
-    onSave: (List<String>, BlockMode, List<String>, Map<String, Long?>) -> Unit,
+    onSave: (List<String>, BlockMode, List<String>, Map<String, Long?>, ModeOptions) -> Unit,
     scannedNfcTagId: MutableState<String?>? = null,
     nfcRegistrationMode: MutableState<Boolean>? = null,
     onRegisterTag: (String, String) -> Boolean = { _, _ -> false }
@@ -76,6 +77,8 @@ fun ModeEditorScreen(
     var blockMode by remember { mutableStateOf(mode.blockMode) }
     var selectedNfcTagIds by remember { mutableStateOf(mode.nfcTagIds.toSet()) }
     var tagUnlockLimits by remember { mutableStateOf(mode.tagUnlockLimits) }
+    var options by remember { mutableStateOf(mode.options) }
+    var showOptions by remember { mutableStateOf(false) }
     var installedApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
@@ -162,7 +165,7 @@ fun ModeEditorScreen(
                         if (!hasPermanentUnlockWay) {
                             showPermanentUnlockWarning = true
                         } else {
-                            onSave(selectedApps.toList(), blockMode, selectedNfcTagIds.toList(), tagUnlockLimits)
+                            onSave(selectedApps.toList(), blockMode, selectedNfcTagIds.toList(), tagUnlockLimits, options)
                         }
                     },
                     enabled = selectedApps.isNotEmpty(),
@@ -239,6 +242,32 @@ fun ModeEditorScreen(
                 ) {
                     Text(stringResource(R.string.modes_allow_only), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { showOptions = true },
+                shape = RoundedCornerShape(0.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                Icon(Icons.Default.Tune, contentDescription = null, tint = GuardianTheme.IconPrimary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.options_button), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = GuardianTheme.TextPrimary)
+            }
+
+            if (showOptions) {
+                ModeOptionsDialog(
+                    initial = options,
+                    installedApps = installedApps,
+                    onDismiss = { showOptions = false },
+                    onConfirm = {
+                        options = it
+                        showOptions = false
+                    }
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -538,7 +567,7 @@ fun ModeEditorScreen(
                     modifier = Modifier.testTag(TestTags.ModeEditor.NO_PERMANENT_SAVE_ANYWAY),
                     onClick = {
                         showPermanentUnlockWarning = false
-                        onSave(selectedApps.toList(), blockMode, selectedNfcTagIds.toList(), tagUnlockLimits)
+                        onSave(selectedApps.toList(), blockMode, selectedNfcTagIds.toList(), tagUnlockLimits, options)
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GuardianTheme.Warning,

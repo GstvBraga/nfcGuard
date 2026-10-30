@@ -493,6 +493,10 @@ fun SettingsDialog(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(8.dp))
+
+                AutomationSettings(appState)
             }
         },
         confirmButton = {
