@@ -42,7 +42,8 @@ data class Mode(
     val nfcTagId: String? = null,
     val nfcTagIds: List<String> = emptyList(),
     /** tagId -> max unlock duration in minutes (null = permanent). Key "ANY" matches any tag. */
-    val tagUnlockLimits: Map<String, Long?> = emptyMap()
+    val tagUnlockLimits: Map<String, Long?> = emptyMap(),
+    val options: ModeOptions = ModeOptions()
 ) {
     /** Resolved tag list: migrates the legacy single-tag field automatically. */
     val effectiveNfcTagIds: List<String>
@@ -57,6 +58,31 @@ data class Mode(
         return null
     }
 }
+
+/**
+ * Optional per-mode behavior beyond app blocking. Every field defaults to
+ * "off" so configs written before these existed load unchanged.
+ */
+@Serializable
+data class ModeOptions(
+    /** Scanning one of the mode's own tags (not "ANY") while it is off turns it on. */
+    val tagStartsMode: Boolean = false,
+    /** When started by a tag, switch off again after this many minutes. null = until unlocked. */
+    val tagSessionMinutes: Long? = null,
+    /** Minutes of in-app breaks allowed per session, no tag needed. null = no breaks. */
+    val breakBudgetMinutes: Long? = null,
+    val doNotDisturb: Boolean = false,
+    val ringer: RingerSetting = RingerSetting.UNCHANGED,
+    /** Needs WRITE_SECURE_SETTINGS, granted once over adb. */
+    val grayscale: Boolean = false,
+    /** Package launched when the mode turns on. */
+    val launchApp: String? = null,
+    val blockReels: Boolean = false,
+    val blockShorts: Boolean = false
+)
+
+@Serializable
+enum class RingerSetting { UNCHANGED, VIBRATE, SILENT }
 
 @Serializable
 data class Schedule(
@@ -111,7 +137,9 @@ data class AppState(
      * [ScheduleTransitions.missedScheduleStarts] tell a start that never ran
      * from one the user has since unlocked.
      */
-    val scheduleLastStartedAt: Map<String, Long> = emptyMap()
+    val scheduleLastStartedAt: Map<String, Long> = emptyMap(),
+    /** modeId -> break minutes already taken this session. Cleared when the mode is switched on. */
+    val breakUsedMinutes: Map<String, Long> = emptyMap()
 )
 
 /** Pending NFC unlock awaiting user duration choice. Not persisted; UI-only. */

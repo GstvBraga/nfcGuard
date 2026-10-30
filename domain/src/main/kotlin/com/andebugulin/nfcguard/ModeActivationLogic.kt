@@ -63,7 +63,8 @@ object ModeActivationLogic {
             manuallyActivatedModes = state.manuallyActivatedModes + modeId,
             timedModeDeactivations = newTimedDeactivations,
             timedModeReactivations = state.timedModeReactivations - modeId,
-            pausedModeRemainingMs = state.pausedModeRemainingMs - modeId
+            pausedModeRemainingMs = state.pausedModeRemainingMs - modeId,
+            breakUsedMinutes = state.breakUsedMinutes - modeId
         )
         return ActivateModeResult.Activated(newState)
     }
@@ -165,6 +166,7 @@ object ModeActivationLogic {
             deactivatedSchedules = state.deactivatedSchedules - scheduleId,
             timedModeReactivations = state.timedModeReactivations - linkedModeIdSet,
             pausedModeRemainingMs = state.pausedModeRemainingMs - linkedModeIdSet,
+            breakUsedMinutes = state.breakUsedMinutes - linkedModeIdSet,
             scheduleLastStartedAt = state.scheduleLastStartedAt + (scheduleId to now)
         )
         return ManualScheduleActivationResult.Activated(newState)

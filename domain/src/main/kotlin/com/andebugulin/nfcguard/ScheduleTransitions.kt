@@ -83,6 +83,7 @@ object ScheduleTransitions {
             deactivatedSchedules = state.deactivatedSchedules - scheduleId,
             timedModeReactivations = state.timedModeReactivations - activated,
             pausedModeRemainingMs = state.pausedModeRemainingMs - activated,
+            breakUsedMinutes = state.breakUsedMinutes - activated,
             scheduleLastStartedAt = state.scheduleLastStartedAt + (scheduleId to now)
         )
 
